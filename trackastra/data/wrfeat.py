@@ -219,20 +219,11 @@ class WRFeatures:
         # coords = df[[f"centroid-{i}" for i in range(ndim)]].values.astype(np.float32)
         coords = df[["y", "x"]].values.astype(np.float32)
 
-        features = OrderedDict(
-            (
-                p,
-                np.stack(
-                    [
-                        df[c].values.astype(np.float32)
-                        for c in df.columns
-                        if c.startswith(p)
-                    ],
-                    axis=-1,
-                ),
-            )
-            for p in properties
-        )
+        features = OrderedDict()
+        for c in df.columns:
+            for p in _PROPERTIES["regionprops2"]:
+                if c.startswith(p):
+                    features[c] = df[c].astype(np.float32)
 
         return cls(
             coords=coords, labels=labels, timepoints=timepoints, features=features
