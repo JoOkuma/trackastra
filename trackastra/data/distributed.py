@@ -23,7 +23,7 @@ from torch.utils.data import (
 from .data import CTCData
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+# logger.setLevel(logging.INFO)
 
 
 def cache_class(cachedir=None):

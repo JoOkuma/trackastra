@@ -37,7 +37,7 @@ from trackastra.data.matching import matching
 from trackastra.utils import blockwise_sum, normalize
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+# logger.setLevel(logging.INFO)
 
 
 def _filter_track_df(df, start_frame, end_frame, downscale):

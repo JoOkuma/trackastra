@@ -409,7 +409,11 @@ class TrackingTransformer(torch.nn.Module):
         # outer product is the association matrix (logits)
         A = torch.einsum("bnd,bmd->bnm", x, y)
 
-        return A
+        return {
+            "A": A,
+            "encoder": x,
+            "decoder": y
+        }
 
     def normalize_output(
         self,

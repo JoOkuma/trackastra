@@ -10,7 +10,7 @@ from skimage.measure import regionprops
 from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+# logger.setLevel(logging.INFO)
 
 
 class FoundTracks(Exception):

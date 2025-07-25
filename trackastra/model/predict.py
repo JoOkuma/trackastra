@@ -16,10 +16,10 @@ from trackastra.model import TrackingTransformer
 warnings.simplefilter("ignore", SparseEfficiencyWarning)
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+# logger.setLevel(logging.INFO)
 
 
-def predict(batch: list[dict], model: TrackingTransformer) -> np.ndarray:
+def predict(batch: list[dict], model: TrackingTransformer) -> dict[str, np.ndarray]:
     """Predict association scores between objects in a batch of windows.
 
     Args:
@@ -52,11 +52,17 @@ def predict(batch: list[dict], model: TrackingTransformer) -> np.ndarray:
     # Concat timepoints to coordinates
     coords = torch.cat((timepoints.unsqueeze(2).float(), coords), dim=2)
     with torch.no_grad():
-        A = model(coords, features=feats, padding_mask=padding_mask)
+        pred_dict = model(coords, features=feats, padding_mask=padding_mask)
+
+        A = pred_dict["A"]
+        encoder = pred_dict["encoder"]
+        decoder = pred_dict["decoder"]
 
         A = model.normalize_output(A, timepoints, coords)
+        encoder = encoder.detach().cpu().numpy()
+        decoder = decoder.detach().cpu().numpy()
 
-        # # Spatially far entries should not influence the causal normalization
+       # # Spatially far entries should not influence the causal normalization
         # dist = torch.cdist(coords[0, :, 1:], coords[0, :, 1:])
         # invalid = dist > model.config["spatial_pos_cutoff"]
         # A[invalid] = -torch.inf
@@ -64,7 +70,7 @@ def predict(batch: list[dict], model: TrackingTransformer) -> np.ndarray:
         # TODO stay on device for further computation?
         A = A.detach().cpu().numpy()
 
-    return A
+    return {"A": A, "encoder": encoder, "decoder": decoder}
 
 
 def predict_windows(
@@ -140,15 +146,23 @@ def predict_windows(
         csr_array((max_id, max_id), dtype=np.float32),
     )
 
+    enc_acum = np.zeros((max_id, model.config["d_model"]))
+    dec_acum = np.zeros((max_id, model.config["d_model"]))
+    size_acum = np.zeros(max_id, dtype=int)
+
     for t in progbar_class(
         range(0, len(windows), batch_size),
         desc="Computing associations",
     ):
         # This assumes that the samples in the dataset are ordered by time and start at 0.
         batch = windows[t : t + batch_size]
-        A_batch = predict(batch, model)
+        predict_batch_dict = predict(batch, model)
 
-        for i, A in enumerate(A_batch):
+        A_batch = predict_batch_dict["A"]
+        encoder_batch = predict_batch_dict["encoder"]
+        decoder_batch = predict_batch_dict["decoder"]
+
+        for i, (A, encoder, decoder) in enumerate(zip(A_batch, encoder_batch, decoder_batch)):
             timepoints = batch[i]["timepoints"].numpy()
             labels = batch[i]["labels"].numpy()
 
@@ -157,6 +171,15 @@ def predict_windows(
             A = A[: len(timepoints), : len(timepoints)]
             A[~time_mask] = 0
             ii, jj = np.where(A >= edge_threshold)
+
+            nn = np.arange(len(timepoints))
+            labels_nn = labels[nn]
+            ts_nn = timepoints[nn]
+            nodes_nn = np.asarray(tuple(time_labels_to_id[(t, lab)] for t, lab in zip(ts_nn, labels_nn)))
+            
+            enc_acum[nodes_nn] += encoder
+            dec_acum[nodes_nn] += decoder
+            size_acum[nodes_nn] += 1
 
             if len(ii) == 0:
                 continue
@@ -180,6 +203,10 @@ def predict_windows(
             sp_weights[nodes_ii, nodes_jj] += window_weight[ii, jj] * A[ii, jj]
             sp_accum[nodes_ii, nodes_jj] += window_weight[ii, jj]
 
+    size_acum[size_acum == 0] = 1
+    enc_acum /= size_acum[:, None]
+    dec_acum /= size_acum[:, None]
+
     sp_weights_coo = sp_weights.tocoo()
     sp_accum_coo = sp_accum.tocoo()
     assert np.allclose(sp_weights_coo.col, sp_accum_coo.col) and np.allclose(
@@ -200,5 +227,8 @@ def predict_windows(
     results = dict()
     results["nodes"] = node_properties
     results["weights"] = weights
+    results["node_ids"] = [n["id"] for n in node_properties]
+    results["encoder"] = enc_acum
+    results["decoder"] = dec_acum
 
     return results
